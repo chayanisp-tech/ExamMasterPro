@@ -59,6 +59,21 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
     return { user: result.user, accessToken: cachedAccessToken };
   } catch (error: any) {
     console.error("Sign in error:", error);
+    
+    if (error && error.code === "auth/unauthorized-domain") {
+      throw new Error(
+        "UNAUTHORIZED_DOMAIN: โดเมนของเว็บบน Vercel ยังไม่ได้รับอนุญาตให้ใช้บริการลงชื่อเข้าใช้งานของ Firebase Project นี้! " +
+        "กรุณานำโดเมน Vercel ของคุณ (เช่น " + (typeof window !== "undefined" ? window.location.hostname : "ตัวอย่าง.vercel.app") + ") ไปเพิ่มที่ 'Authorized domains' ในระบบตั้งค่า Firebase Authentication"
+      );
+    }
+    
+    if (error && (error.code === "auth/popup-blocked" || error.message?.includes("popup-blocked"))) {
+      throw new Error(
+        "POPUP_BLOCKED: หน้าต่างลงชื่อเข้าใช้ถูกบล็อกโดยตัวบล็อกป๊อปอัป (Popup Blocker) ของเบราว์เซอร์คุณ " +
+        "กรุณาอนุญาตป๊อปอัพสำหรับเว็บนี้ หรือตรวจสอบการอนุญาตป๊อปอัพในเบราว์เซอร์ของคุณแล้วลองใหม่อีกครั้ง"
+      );
+    }
+
     // Provide a detailed Thai error description for iframe / popup blocking issues
     if (error && (error.code === "auth/cancelled-popup-request" || error.message?.includes("cancelled-popup-request"))) {
       throw new Error(

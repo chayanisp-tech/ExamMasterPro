@@ -127,7 +127,7 @@ export async function syncLocalToSheets(
     await updateSheetRange(token, spreadsheetId, "Students!A1", studentValues);
 
     // 2. Sync Scores / Submissions
-    await clearSheetRange(token, spreadsheetId, "Scores!A:L");
+    await clearSheetRange(token, spreadsheetId, "Scores!A:M");
     const scoreValues = [
       [
         "รหัสการส่ง (Submission ID)",
@@ -142,6 +142,7 @@ export async function syncLocalToSheets(
         "จำนวนข้อทั้งหมด (Total Questions)",
         "เวลาที่ส่ง (Submitted At)",
         "สถานะ (Status)",
+        "คำตอบละเอียด JSON (Detailed Answers JSON)",
       ],
       ...submissions.map(s => [
         s.submissionId,
@@ -156,6 +157,7 @@ export async function syncLocalToSheets(
         s.totalQuestions,
         s.submittedAt,
         s.status,
+        JSON.stringify(s.answers || {}),
       ]),
     ];
     await updateSheetRange(token, spreadsheetId, "Scores!A1", scoreValues);
@@ -265,12 +267,18 @@ export async function fetchFromSheets(
     }
 
     // 3. Fetch Submissions / Scores
-    const submissionRows = await fetchRange("Scores!A:L");
+    const submissionRows = await fetchRange("Scores!A:M");
     const submissions: Submission[] = [];
     if (submissionRows && submissionRows.length > 1) {
       for (let i = 1; i < submissionRows.length; i++) {
         const row = submissionRows[i];
         if (row[0]) {
+          let detailedAnswers = {};
+          try {
+            detailedAnswers = JSON.parse(row[12]?.toString() || "{}");
+          } catch (e) {
+            console.error("Failed to parse detailed answers JSON:", row[12]);
+          }
           submissions.push({
             submissionId: row[0].toString().trim(),
             studentId: row[1]?.toString() || "",
@@ -284,6 +292,7 @@ export async function fetchFromSheets(
             totalQuestions: parseInt(row[9]?.toString() || "0", 10),
             submittedAt: row[10]?.toString() || new Date().toISOString(),
             status: (row[11]?.toString() || "สมบูรณ์") as any,
+            answers: detailedAnswers,
           });
         }
       }

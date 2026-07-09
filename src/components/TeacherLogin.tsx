@@ -66,6 +66,10 @@ export default function TeacherLogin({ onLoginSuccess, onGoBack }: TeacherLoginP
       console.error("Google Sign In failed:", err);
       if (err.message && err.message.includes("IFRAME_POPUP_BLOCKED")) {
         setErrorText(err.message.replace("IFRAME_POPUP_BLOCKED: ", ""));
+      } else if (err.message && err.message.includes("UNAUTHORIZED_DOMAIN")) {
+        setErrorText(err.message.replace("UNAUTHORIZED_DOMAIN: ", ""));
+      } else if (err.message && err.message.includes("POPUP_BLOCKED")) {
+        setErrorText(err.message.replace("POPUP_BLOCKED: ", ""));
       } else {
         setErrorText("การเข้าสู่ระบบ Google ล้มเหลว หรือถูกยกเลิก (แนะนำให้เปิดแอปในแท็บใหม่แล้วลองอีกครั้ง)");
       }

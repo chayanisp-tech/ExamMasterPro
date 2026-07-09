@@ -120,7 +120,52 @@ export default function App() {
     }
   };
 
-  // 3. Google Drive / Sheets Synchronizer
+  // 3. Google Drive / Sheets Synchronizer and State Pushing
+  const pushStateToSheets = async (
+    updatedStudents?: Student[],
+    updatedExams?: Exam[],
+    updatedSubmissions?: Submission[],
+    updatedSettings?: SystemSettings
+  ) => {
+    // First, save immediately to local state and localStorage
+    saveStateToLocal(updatedStudents, updatedExams, updatedSubmissions, updatedSettings);
+
+    // If connected to Google, push the updated state directly to Google Sheets without fetching first
+    if (isOAuthConnected) {
+      const token = getAccessToken();
+      const sheetId = syncStatus.spreadsheetId;
+      if (token && sheetId) {
+        try {
+          const studentsToSync = updatedStudents !== undefined ? updatedStudents : JSON.parse(localStorage.getItem("exam_students") || "[]");
+          const examsToSync = updatedExams !== undefined ? updatedExams : JSON.parse(localStorage.getItem("exam_exams") || "[]");
+          const submissionsToSync = updatedSubmissions !== undefined ? updatedSubmissions : JSON.parse(localStorage.getItem("exam_submissions") || "[]");
+          const settingsToSync = updatedSettings !== undefined ? updatedSettings : JSON.parse(localStorage.getItem("exam_settings") || JSON.stringify(DEFAULT_SETTINGS));
+
+          await syncLocalToSheets(
+            token,
+            sheetId,
+            studentsToSync,
+            examsToSync,
+            submissionsToSync,
+            settingsToSync
+          );
+
+          // Update last sync time
+          const nextSync: SyncStatus = {
+            ...syncStatus,
+            lastSyncedAt: new Date().toISOString(),
+            isSyncing: false,
+            error: null,
+          };
+          setSyncStatus(nextSync);
+          localStorage.setItem("exam_sync_status", JSON.stringify(nextSync));
+        } catch (err: any) {
+          console.error("Direct push to Google Sheets failed:", err);
+        }
+      }
+    }
+  };
+
   const handleFullSync = async (forceToken?: string) => {
     const token = forceToken || getAccessToken();
     if (!token) {
@@ -166,24 +211,30 @@ export default function App() {
       let mergedSettings = currentLocals.settings;
 
       if (fetched) {
-        // Merge Students (favor local, add unique ones from sheets, or vice-versa)
-        // For simplicity, we merge unique elements by ID
-        const studentMap = new Map(currentLocals.students.map((s: Student) => [s.id, s]));
-        fetched.students.forEach((s) => studentMap.set(s.id, s));
-        mergedStudents = Array.from(studentMap.values());
+        const isSheetEmpty = 
+          fetched.students.length === 0 && 
+          fetched.exams.length === 0 && 
+          fetched.submissions.length === 0;
 
-        // Merge Exams
-        const examMap = new Map(currentLocals.exams.map((e: Exam) => [e.id, e]));
-        fetched.exams.forEach((e) => examMap.set(e.id, e));
-        mergedExams = Array.from(examMap.values());
+        if (isSheetEmpty) {
+          // Spreadsheet is empty / newly initialized. We push browser's local state to Google Sheets.
+          mergedStudents = currentLocals.students;
+          mergedExams = currentLocals.exams;
+          mergedSubmissions = currentLocals.submissions;
+          mergedSettings = currentLocals.settings;
+        } else {
+          // Spreadsheet has records. We treat Google Sheets as the absolute source of truth for
+          // Students, Exams and Settings (allowing direct additions/deletions in Sheets to sync down to the browser).
+          // Submissions are merged additively so no scores are ever lost.
+          mergedStudents = fetched.students;
+          mergedExams = fetched.exams;
+          mergedSettings = { ...currentLocals.settings, ...fetched.settings };
 
-        // Merge Submissions
-        const subMap = new Map(currentLocals.submissions.map((s: Submission) => [s.submissionId, s]));
-        fetched.submissions.forEach((s) => subMap.set(s.submissionId, s));
-        mergedSubmissions = Array.from(subMap.values());
-
-        // Merge Settings
-        mergedSettings = { ...currentLocals.settings, ...fetched.settings };
+          // Additive merge for submissions (always secure)
+          const subMap = new Map(currentLocals.submissions.map((s: Submission) => [s.submissionId, s]));
+          fetched.submissions.forEach((s) => subMap.set(s.submissionId, s));
+          mergedSubmissions = Array.from(subMap.values());
+        }
       }
 
       // Update states and local storage with the merged items
@@ -211,10 +262,24 @@ export default function App() {
       localStorage.setItem("exam_sync_status", JSON.stringify(nextSync));
     } catch (err: any) {
       console.error("Full Sync Error:", err);
+      
+      const isAuthError = err?.message?.includes("invalid authentication credentials") || 
+                          err?.message?.includes("Expected OAuth 2") ||
+                          err?.message?.includes("401");
+      
+      let userFriendlyError = err?.message || "เกิดข้อผิดพลาดในการซิงค์ข้อมูล";
+      
+      if (isAuthError) {
+        userFriendlyError = "เซสชัน Google Sheets หมดอายุหรือไม่ได้เปิดสิทธิ์กรุณากดคลิกปุ่ม 'เชื่อมโยง Google Drive & Sheets' อีกครั้งเพื่อต่ออายุและยืนยันสิทธิ์";
+        // Disconnect the session status so user is prompted to reconnect
+        setIsOAuthConnected(false);
+        logout(); // clear internal credentials & localStorage
+      }
+
       const nextSync: SyncStatus = {
         ...syncStatus,
         isSyncing: false,
-        error: err?.message || "เกิดข้อผิดพลาดในการซิงค์ข้อมูล",
+        error: userFriendlyError,
       };
       setSyncStatus(nextSync);
       localStorage.setItem("exam_sync_status", JSON.stringify(nextSync));
@@ -247,19 +312,12 @@ export default function App() {
   };
 
   // Student Submitting Exam
-  const handleExamSubmitted = (submission: Submission) => {
-    // Append to local state & persist
+  const handleExamSubmitted = async (submission: Submission) => {
+    // Append to local state & push immediately to Google Sheets
     const nextSubmissions = [submission, ...submissions];
-    saveStateToLocal(undefined, undefined, nextSubmissions);
+    await pushStateToSheets(undefined, undefined, nextSubmissions);
     setLatestSubmission(submission);
     setCurrentScreen("student_success");
-
-    // Attempt to background-sync to Google Drive if connected
-    if (isOAuthConnected) {
-      setTimeout(() => {
-        handleFullSync();
-      }, 500);
-    }
   };
 
   // Manual Trigger Google Sheet authentication popup
@@ -273,9 +331,13 @@ export default function App() {
       }
     } catch (err: any) {
       console.error("Google sync authorization cancelled:", err);
+      let errMsg = err?.message || "การตรวจสอบสิทธิ์ล้มเหลว หรือ ป๊อปอัพถูกบล็อก";
+      errMsg = errMsg.replace("IFRAME_POPUP_BLOCKED: ", "")
+                     .replace("UNAUTHORIZED_DOMAIN: ", "")
+                     .replace("POPUP_BLOCKED: ", "");
       setSyncStatus((prev) => ({
         ...prev,
-        error: err?.message || "การตรวจสอบสิทธิ์ล้มเหลว หรือ ป๊อปอัพถูกบล็อก"
+        error: errMsg
       }));
     }
   };
@@ -303,13 +365,13 @@ export default function App() {
   // Default bulk roster data populator
   const handleBulkLoadDefaults = () => {
     if (window.confirm("คุณแน่ใจที่จะคืนค่ารายชื่อนักเรียนเริ่มต้นทั้งหมดหรือไม่?")) {
-      saveStateToLocal(DEFAULT_STUDENTS);
+      pushStateToSheets(DEFAULT_STUDENTS);
     }
   };
 
   // Clear roster
   const handleClearRoster = () => {
-    saveStateToLocal([]);
+    pushStateToSheets([]);
   };
 
   return (
@@ -318,6 +380,8 @@ export default function App() {
       {currentScreen === "student_welcome" && (
         <StudentWelcome
           students={students}
+          submissions={submissions}
+          activeExams={exams}
           onEnterExamRoom={handleEnterExamRoom}
           onGoToTeacherLogin={() => setCurrentScreen("teacher_login")}
           onGoToScoreLookup={() => setCurrentScreen("student_score_lookup")}
@@ -329,6 +393,7 @@ export default function App() {
         <StudentExamRoom
           student={currentStudent}
           activeExams={exams}
+          submissions={submissions}
           onExamSubmitted={handleExamSubmitted}
           onGoBack={() => {
             setCurrentStudent(null);
@@ -380,35 +445,45 @@ export default function App() {
           students={students}
           onAddStudent={(newStudent) => {
             const next = [newStudent, ...students];
-            saveStateToLocal(next);
+            pushStateToSheets(next);
           }}
           onDeleteStudent={(id) => {
             const next = students.filter((s) => s.id !== id);
-            saveStateToLocal(next);
+            pushStateToSheets(next);
           }}
           onBulkLoadDefaults={handleBulkLoadDefaults}
           onClearRoster={handleClearRoster}
           exams={exams}
           onAddExam={(newExam) => {
             const next = [newExam, ...exams];
-            saveStateToLocal(undefined, next);
+            pushStateToSheets(undefined, next);
           }}
           onDeleteExam={(id) => {
             const next = exams.filter((e) => e.id !== id);
-            saveStateToLocal(undefined, next);
+            pushStateToSheets(undefined, next);
           }}
           onToggleActive={(id) => {
             const next = exams.map((e) => (e.id === id ? { ...e, isActive: !e.isActive } : e));
-            saveStateToLocal(undefined, next);
+            pushStateToSheets(undefined, next);
+          }}
+          onUpdateExam={(updatedExam) => {
+            const next = exams.map((e) => (e.id === updatedExam.id ? updatedExam : e));
+            pushStateToSheets(undefined, next);
           }}
           submissions={submissions}
           onDeleteSubmission={(id) => {
             const next = submissions.filter((s) => s.submissionId !== id);
-            saveStateToLocal(undefined, undefined, next);
+            pushStateToSheets(undefined, undefined, next);
+          }}
+          onUpdateSubmission={(updatedSubmission) => {
+            const next = submissions.map((s) =>
+              s.submissionId === updatedSubmission.submissionId ? updatedSubmission : s
+            );
+            pushStateToSheets(undefined, undefined, next);
           }}
           settings={settings}
           onUpdateSettings={(newSettings) => {
-            saveStateToLocal(undefined, undefined, undefined, newSettings);
+            pushStateToSheets(undefined, undefined, undefined, newSettings);
           }}
           onDiscardSettings={() => {
             setSettings(JSON.parse(localStorage.getItem("exam_settings") || JSON.stringify(DEFAULT_SETTINGS)));

@@ -51,19 +51,29 @@ export default function ExamSuccess({
 
       {/* Main Success Content Canvas */}
       <div className="relative z-10 w-full max-w-4xl text-center flex flex-col items-center mt-12">
-        {/* Giant checkmark badge */}
-        <div className="w-24 h-24 rounded-full bg-[#8e171c] flex items-center justify-center text-white shadow-xl shadow-[#8e171c]/10 mb-8 animate-bounce">
-          <span className="material-symbols-outlined text-[54px]" style={{ fontVariationSettings: "'FILL' 0, 'wght' 600" }}>
-            check_circle
-          </span>
-        </div>
+        {/* Giant checkmark/warning badge */}
+        {submission.status === "ทุจริต" ? (
+          <div className="w-24 h-24 rounded-full bg-amber-500 flex items-center justify-center text-white shadow-xl shadow-amber-500/10 mb-8 animate-pulse">
+            <span className="material-symbols-outlined text-[54px]" style={{ fontVariationSettings: "'FILL' 1, 'wght' 600" }}>
+              warning
+            </span>
+          </div>
+        ) : (
+          <div className="w-24 h-24 rounded-full bg-[#8e171c] flex items-center justify-center text-white shadow-xl shadow-[#8e171c]/10 mb-8 animate-bounce">
+            <span className="material-symbols-outlined text-[54px]" style={{ fontVariationSettings: "'FILL' 0, 'wght' 600" }}>
+              check_circle
+            </span>
+          </div>
+        )}
 
         {/* Headings */}
         <h1 className="text-4xl md:text-5xl font-black text-[#8e171c] mb-3 tracking-tight">
-          ส่งข้อสอบเรียบร้อยแล้ว
+          {submission.status === "ทุจริต" ? "ระงับการสอบ (บังคับส่งคำตอบ)" : "ส่งข้อสอบเรียบร้อยแล้ว"}
         </h1>
-        <p className="text-base text-[#59413f] mb-12">
-          ระบบได้รับข้อสอบของคุณแล้ว ขอบคุณที่ตั้งใจทำข้อสอบ
+        <p className="text-base text-[#59413f] mb-12 max-w-2xl">
+          {submission.status === "ทุจริต" 
+            ? "ตรวจพบการเปิดแท็บอื่น สลับหน้าต่าง หรือคลิกออกนอกหน้าจอระหว่างการทำข้อสอบ ระบบจึงทำการบังคับส่งคำตอบปัจจุบันของคุณทันทีเพื่อป้องกันการทุจริต" 
+            : "ระบบได้รับข้อสอบของคุณแล้ว ขอบคุณที่ตั้งใจทำข้อสอบ"}
         </p>
 
         {/* Info Grid - 2 Main Columns */}
@@ -82,12 +92,12 @@ export default function ExamSuccess({
           </div>
 
           {/* Right card: Cloud Status */}
-          <div className="bg-[#8e171c] text-white rounded-3xl p-6 flex flex-col justify-center items-center shadow-sm relative overflow-hidden">
+          <div className={`${submission.status === "ทุจริต" ? "bg-amber-600" : "bg-[#8e171c]"} text-white rounded-3xl p-6 flex flex-col justify-center items-center shadow-sm relative overflow-hidden`}>
             <span className="material-symbols-outlined text-[40px] text-[#ffdad7] mb-2" style={{ fontVariationSettings: "'FILL' 1" }}>
-              cloud_done
+              {submission.status === "ทุจริต" ? "gavel" : "cloud_done"}
             </span>
             <span className="text-sm font-semibold text-[#ffd0cc]">สถานะ</span>
-            <span className="text-lg font-bold">สมบูรณ์</span>
+            <span className="text-lg font-bold">{submission.status === "ทุจริต" ? "พยายามทุจริต" : "สมบูรณ์"}</span>
           </div>
         </div>
 
@@ -137,10 +147,24 @@ export default function ExamSuccess({
           </button>
         </div>
 
-        {/* Small Notice Alert */}
-        <div className="mt-8 flex items-center gap-1.5 text-xs text-[#59413f]">
-          <span className="material-symbols-outlined text-[16px] text-[#8e171c]">info</span>
-          <span>คุณสามารถตรวจสอบคะแนนสอบได้ในช่วงเย็นตามเวลาที่กำหนด</span>
+        {/* Notice Alert */}
+        <div className="mt-8 flex flex-col items-center gap-2">
+          {submission.status === "ทุจริต" ? (
+            <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-3xl p-5 max-w-lg text-xs font-semibold flex items-start gap-3 text-left">
+              <span className="material-symbols-outlined text-[20px] text-amber-600 shrink-0">info</span>
+              <div>
+                <p className="font-bold mb-1">⚠️ โอกาสแก้สอบแก้ตัว!</p>
+                <p className="font-medium text-amber-700 leading-relaxed">
+                  เนื่องจากคุณพยายามทำพฤติกรรมสลับแท็บ/ออกนอกหน้าจอในครั้งแรก ระบบจึงตัดคำตอบทันที อย่างไรก็ตาม คุณยังคงได้รับโอกาสเข้าสอบแก้ตัวใหม่อีก <strong>1 ครั้งถ้วน</strong> โดยสามารถล็อกอินเข้าระบบด้วยรหัสนักเรียนเดิมและกดปุ่มเริ่มสอบใหม่อีกครั้ง
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5 text-xs text-[#59413f]">
+              <span className="material-symbols-outlined text-[16px] text-[#8e171c]">info</span>
+              <span>คุณสามารถตรวจสอบคะแนนสอบได้ในช่วงเย็นตามเวลาที่กำหนด</span>
+            </div>
+          )}
         </div>
       </div>
     </div>

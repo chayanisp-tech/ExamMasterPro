@@ -10,6 +10,7 @@ export interface Question {
   options: string[];
   answerIndex: number; // 0-based index
   points: number;
+  type?: "choice" | "subjective";
 }
 
 export interface Exam {
@@ -35,6 +36,7 @@ export interface Submission {
   totalQuestions: number;
   submittedAt: string; // ISO string
   status: "สมบูรณ์" | "ไม่สมบูรณ์" | "ทุจริต";
+  answers?: Record<string, any>;
 }
 
 export interface SystemSettings {

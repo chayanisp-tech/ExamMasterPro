@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from "react";
 import { Student, Exam, Question, Submission } from "../types";
+import DrawingCanvas from "./DrawingCanvas";
 
 interface StudentExamRoomProps {
   student: Student;
   activeExams: Exam[];
+  submissions: Submission[];
   onExamSubmitted: (submission: Submission) => void;
   onGoBack: () => void;
 }
@@ -11,14 +13,123 @@ interface StudentExamRoomProps {
 export default function StudentExamRoom({
   student,
   activeExams,
+  submissions,
   onExamSubmitted,
   onGoBack,
 }: StudentExamRoomProps) {
   const [selectedExam, setSelectedExam] = useState<Exam | null>(null);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
-  const [answers, setAnswers] = useState<Record<string, number>>({}); // { questionId: selectedIndex }
+  const [answers, setAnswers] = useState<Record<string, any>>({}); // { questionId: number | { text: string, drawing?: string } }
   const [secondsRemaining, setSecondsRemaining] = useState(0);
   const [isExamStarted, setIsExamStarted] = useState(false);
+
+  // Sync answers and exam to refs for cheat detection event listeners
+  const answersRef = React.useRef(answers);
+  const selectedExamRef = React.useRef(selectedExam);
+
+  useEffect(() => {
+    answersRef.current = answers;
+  }, [answers]);
+
+  useEffect(() => {
+    selectedExamRef.current = selectedExam;
+  }, [selectedExam]);
+
+  // Anti-Cheat (tab change / blur) Detection
+  useEffect(() => {
+    if (!isExamStarted) return;
+
+    let alreadyTriggered = false;
+
+    const handleCheatDetected = () => {
+      if (alreadyTriggered) return;
+      alreadyTriggered = true;
+
+      // Force submit with status "ทุจริต"
+      const exam = selectedExamRef.current;
+      if (!exam) return;
+
+      alert("⚠️ ตรวจพบการย้ายหน้าจอสอบ บล็อกความพยายามสลับแท็บ หรือเปิดหน้าต่างอื่น!\n\nระบบจำเป็นต้อง บังคับส่งข้อสอบโดยอัตโนมัติ ทันที และรายงานความพฤติกรรมทุจริตนี้ได้รับการส่งให้ผู้ดูแลระบบแล้ว");
+
+      const currentAnswers = answersRef.current;
+      let totalPoints = 0;
+      let autoScore = 0;
+      let actualAnsweredCount = 0;
+
+      exam.questions.forEach((q) => {
+        totalPoints += q.points;
+        const ans = currentAnswers[q.id];
+        if (q.type === "subjective") {
+          if (ans && (ans.text?.trim() || ans.drawing)) {
+            actualAnsweredCount++;
+          }
+        } else {
+          if (ans !== undefined) {
+            actualAnsweredCount++;
+            if (ans === q.answerIndex) {
+              autoScore += q.points;
+            }
+          }
+        }
+      });
+
+      const newSubmission: Submission = {
+        submissionId: `EX-${Math.floor(100000 + Math.random() * 900000)}`,
+        studentId: student.id,
+        studentName: student.name,
+        studentClassName: student.className,
+        examId: exam.id,
+        examTitle: exam.title,
+        score: autoScore,
+        totalPoints: totalPoints,
+        answeredCount: actualAnsweredCount,
+        totalQuestions: exam.questions.length,
+        submittedAt: new Date().toISOString(),
+        status: "ทุจริต",
+        answers: currentAnswers,
+      };
+
+      onExamSubmitted(newSubmission);
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        handleCheatDetected();
+      }
+    };
+
+    const handleWindowBlur = () => {
+      handleCheatDetected();
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("blur", handleWindowBlur);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("blur", handleWindowBlur);
+    };
+  }, [isExamStarted, student, onExamSubmitted]);
+
+  const handleSubjectiveTextChange = (questionId: string, text: string) => {
+    setAnswers((prev) => ({
+      ...prev,
+      [questionId]: {
+        ...(prev[questionId] || {}),
+        text,
+      },
+    }));
+  };
+
+  const handleSubjectiveDrawingChange = (questionId: string, drawingDataUrl: string) => {
+    setAnswers((prev) => ({
+      ...prev,
+      [questionId]: {
+        ...(prev[questionId] || {}),
+        drawing: drawingDataUrl,
+      },
+    }));
+  };
 
   // Filter only active exams
   const exams = activeExams.filter((e) => e.isActive);
@@ -66,8 +177,29 @@ export default function StudentExamRoom({
   const handleSubmitExam = (isTimeUp = false) => {
     if (!selectedExam) return;
 
+    let totalPoints = 0;
+    let autoScore = 0;
+    let actualAnsweredCount = 0;
+
+    selectedExam.questions.forEach((q) => {
+      totalPoints += q.points;
+      const ans = answers[q.id];
+      if (q.type === "subjective") {
+        if (ans && (ans.text?.trim() || ans.drawing)) {
+          actualAnsweredCount++;
+        }
+      } else {
+        if (ans !== undefined) {
+          actualAnsweredCount++;
+          if (ans === q.answerIndex) {
+            autoScore += q.points;
+          }
+        }
+      }
+    });
+
     if (!isTimeUp) {
-      const unansweredCount = selectedExam.questions.length - Object.keys(answers).length;
+      const unansweredCount = selectedExam.questions.length - actualAnsweredCount;
       let confirmMsg = "คุณแน่ใจหรือไม่ที่จะส่งข้อสอบ? เมื่อส่งแล้วจะไม่สามารถแก้ไขคำตอบได้อีก";
       if (unansweredCount > 0) {
         confirmMsg = `คุณยังไม่ได้ตอบคำถามอีก ${unansweredCount} ข้อ แน่ใจหรือไม่ที่จะส่งข้อสอบในตอนนี้?`;
@@ -78,18 +210,6 @@ export default function StudentExamRoom({
       alert("หมดเวลาทำข้อสอบ! ระบบจะทำการส่งข้อสอบของคุณโดยอัตโนมัติ");
     }
 
-    // Calculate score
-    let score = 0;
-    let totalPoints = 0;
-    selectedExam.questions.forEach((q) => {
-      totalPoints += q.points;
-      if (answers[q.id] === q.answerIndex) {
-        score += q.points;
-      }
-    });
-
-    const answeredCount = Object.keys(answers).length;
-
     // Generate Submission object
     const newSubmission: Submission = {
       submissionId: `EX-${Math.floor(100000 + Math.random() * 900000)}`,
@@ -98,12 +218,13 @@ export default function StudentExamRoom({
       studentClassName: student.className,
       examId: selectedExam.id,
       examTitle: selectedExam.title,
-      score: score,
+      score: autoScore,
       totalPoints: totalPoints,
-      answeredCount: answeredCount,
+      answeredCount: actualAnsweredCount,
       totalQuestions: selectedExam.questions.length,
       submittedAt: new Date().toISOString(),
       status: "สมบูรณ์",
+      answers: answers,
     };
 
     onExamSubmitted(newSubmission);
@@ -149,39 +270,90 @@ export default function StudentExamRoom({
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {exams.map((exam) => (
-                <div
-                  key={exam.id}
-                  className="bg-white border border-[#e0bfbc]/60 rounded-3xl p-6 shadow-sm hover:shadow-md transition-all flex flex-col justify-between"
-                >
-                  <div>
-                    <div className="flex justify-between items-start gap-2 mb-4">
-                      <span className="px-3 py-1 bg-[#ffdad7] text-[#8e171c] font-bold text-xs rounded-full">
-                        {exam.courseCode}
-                      </span>
-                      <span className="text-xs text-[#8c706e] font-semibold flex items-center gap-1">
-                        <span className="material-symbols-outlined text-[14px]">timer</span>
-                        {exam.timeLimitMinutes} นาที
-                      </span>
-                    </div>
-                    <h3 className="text-xl font-bold text-[#251817] mb-2">{exam.title}</h3>
-                    <p className="text-sm text-[#59413f] mb-6 line-clamp-3">{exam.description}</p>
-                  </div>
+              {exams.map((exam) => {
+                const examSubmissions = submissions.filter(
+                  (s) => s.studentId === student.id && s.examId === exam.id
+                );
+                const hasCompleted = examSubmissions.some((s) => s.status === "สมบูรณ์");
+                const cheatAttempts = examSubmissions.filter((s) => s.status === "ทุจริต").length;
+                const hasRemainingAttempt = cheatAttempts === 1 && !hasCompleted;
+                const isBlocked = hasCompleted || cheatAttempts >= 2;
 
-                  <div className="border-t border-[#e0bfbc]/30 pt-4 flex items-center justify-between">
-                    <span className="text-xs text-[#8c706e] font-semibold flex items-center gap-1">
-                      <span className="material-symbols-outlined text-[14px]">help</span>
-                      {exam.questions.length} ข้อถาม
-                    </span>
-                    <button
-                      onClick={() => handleStartExam(exam)}
-                      className="px-5 py-2.5 bg-[#8e171c] hover:bg-[#8c161b] text-white rounded-full font-bold text-sm transition-all shadow-md shadow-[#8e171c]/10 cursor-pointer"
-                    >
-                      เริ่มทำข้อสอบ
-                    </button>
+                return (
+                  <div
+                    key={exam.id}
+                    className="bg-white border border-[#e0bfbc]/60 rounded-3xl p-6 shadow-sm hover:shadow-md transition-all flex flex-col justify-between"
+                  >
+                    <div>
+                      <div className="flex justify-between items-start gap-2 mb-4">
+                        <span className="px-3 py-1 bg-[#ffdad7] text-[#8e171c] font-bold text-xs rounded-full">
+                          {exam.courseCode}
+                        </span>
+                        <span className="text-xs text-[#8c706e] font-semibold flex items-center gap-1">
+                          <span className="material-symbols-outlined text-[14px]">timer</span>
+                          {exam.timeLimitMinutes} นาที
+                        </span>
+                      </div>
+                      <h3 className="text-xl font-bold text-[#251817] mb-2">{exam.title}</h3>
+                      <p className="text-sm text-[#59413f] mb-4 line-clamp-3">{exam.description}</p>
+
+                      {/* Display Status Badges */}
+                      <div className="mb-4">
+                        {hasCompleted && (
+                          <div className="px-4 py-2 bg-[#eaf5ea] border border-[#b2dbb2] text-[#2b6a2b] text-xs font-bold rounded-2xl flex items-center gap-1.5">
+                            <span className="material-symbols-outlined text-[16px]">check_circle</span>
+                            <span>คุณได้ส่งคำตอบแล้ว</span>
+                          </div>
+                        )}
+                        {cheatAttempts === 1 && !hasCompleted && (
+                          <div className="px-4 py-2 bg-[#fff1e0] border border-[#ffd29e] text-[#b35c00] text-xs font-bold rounded-2xl flex flex-col gap-1">
+                            <div className="flex items-center gap-1.5">
+                              <span className="material-symbols-outlined text-[16px]">warning</span>
+                              <span>ตรวจพบการพยายามทุจริตในครั้งแรก</span>
+                            </div>
+                            <p className="text-[10px] font-medium ml-5 text-[#8c4800]">คุณได้รับสิทธิ์เข้าสอบแก้ตัวได้ใหม่อีก 1 ครั้ง (โอกาสสุดท้าย)</p>
+                          </div>
+                        )}
+                        {cheatAttempts >= 2 && (
+                          <div className="px-4 py-2 bg-[#ffebeb] border border-[#ffc2c2] text-[#c92a2a] text-xs font-bold rounded-2xl flex items-center gap-1.5">
+                            <span className="material-symbols-outlined text-[16px]">error</span>
+                            <span>หมดสิทธิ์สอบ (ตรวจพบการพยายามทุจริตเกินกำหนด)</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="border-t border-[#e0bfbc]/30 pt-4 flex items-center justify-between">
+                      <span className="text-xs text-[#8c706e] font-semibold flex items-center gap-1">
+                        <span className="material-symbols-outlined text-[14px]">help</span>
+                        {exam.questions.length} ข้อถาม
+                      </span>
+                      {isBlocked ? (
+                        <button
+                          disabled
+                          className="px-5 py-2.5 bg-gray-200 text-gray-400 rounded-full font-bold text-sm cursor-not-allowed"
+                        >
+                          เริ่มทำข้อสอบ
+                        </button>
+                      ) : hasRemainingAttempt ? (
+                        <button
+                          onClick={() => handleStartExam(exam)}
+                          className="px-5 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-full font-bold text-sm transition-all shadow-md shadow-amber-600/10 cursor-pointer"
+                        >
+                          เริ่มสอบแก้ตัว (โอกาสสุดท้าย)
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => handleStartExam(exam)}
+                          className="px-5 py-2.5 bg-[#8e171c] hover:bg-[#8c161b] text-white rounded-full font-bold text-sm transition-all shadow-md shadow-[#8e171c]/10 cursor-pointer"
+                        >
+                          เริ่มทำข้อสอบ
+                        </button>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -190,8 +362,16 @@ export default function StudentExamRoom({
   }
 
   const currentQuestion: Question = selectedExam.questions[currentQuestionIndex];
-  const answeredCount = Object.keys(answers).length;
-  const progressPercent = (answeredCount / selectedExam.questions.length) * 100;
+  
+  const actualAnsweredCount = selectedExam.questions.filter((q) => {
+    const ans = answers[q.id];
+    if (q.type === "subjective") {
+      return !!(ans?.text?.trim() || ans?.drawing);
+    }
+    return ans !== undefined;
+  }).length;
+
+  const progressPercent = (actualAnsweredCount / selectedExam.questions.length) * 100;
   const isTimeCritical = secondsRemaining <= 300; // Last 5 minutes
 
   return (
@@ -240,7 +420,9 @@ export default function StudentExamRoom({
             <h4 className="text-xs font-bold text-[#59413f] uppercase tracking-wider mb-4">ผังข้อสอบ</h4>
             <div className="grid grid-cols-4 gap-2">
               {selectedExam.questions.map((q, idx) => {
-                const isAnswered = answers[q.id] !== undefined;
+                const isAnswered = q.type === "subjective"
+                  ? !!(answers[q.id]?.text?.trim() || answers[q.id]?.drawing)
+                  : answers[q.id] !== undefined;
                 const isCurrent = idx === currentQuestionIndex;
                 return (
                   <button
@@ -267,11 +449,11 @@ export default function StudentExamRoom({
               </div>
               <div className="flex items-center gap-2">
                 <span className="w-3 h-3 rounded-full bg-[#ffd0cc]"></span>
-                <span>ตอบแล้ว ({answeredCount} ข้อ)</span>
+                <span>ตอบแล้ว ({actualAnsweredCount} ข้อ)</span>
               </div>
               <div className="flex items-center gap-2">
                 <span className="w-3 h-3 rounded-full bg-[#fff8f7] border border-[#e0bfbc]"></span>
-                <span>ยังไม่ได้ทำ ({selectedExam.questions.length - answeredCount} ข้อ)</span>
+                <span>ยังไม่ได้ทำ ({selectedExam.questions.length - actualAnsweredCount} ข้อ)</span>
               </div>
             </div>
           </div>
@@ -280,8 +462,19 @@ export default function StudentExamRoom({
           <div className="md:col-span-3 space-y-6">
             <div className="bg-white border border-[#e0bfbc]/60 rounded-3xl p-6 md:p-8 shadow-sm relative">
               <div className="flex justify-between items-center mb-6">
-                <span className="text-xs font-bold text-[#8c706e]">
+                <span className="text-xs font-bold text-[#8c706e] flex items-center gap-1.5">
                   คำถามที่ {currentQuestionIndex + 1} จาก {selectedExam.questions.length}
+                  {currentQuestion.type === "subjective" ? (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#ffe9e7] text-[#8e171c] font-bold rounded-full text-[9px]">
+                      <span className="material-symbols-outlined text-[10px]">edit_note</span>
+                      อัตนัย (พิมพ์ตอบ & วาดภาพ)
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#eaf5ea] text-[#2b6a2b] font-bold rounded-full text-[9px]">
+                      <span className="material-symbols-outlined text-[10px]">list_alt</span>
+                      ปรนัย (5 ตัวเลือก)
+                    </span>
+                  )}
                 </span>
                 <span className="text-xs font-bold text-[#8e171c] bg-[#ffdad7] px-2.5 py-1 rounded-full">
                   {currentQuestion.points} คะแนน
@@ -293,33 +486,61 @@ export default function StudentExamRoom({
                 {currentQuestion.text}
               </h2>
 
-              {/* Option Choices */}
-              <div className="space-y-4">
-                {currentQuestion.options.map((option, idx) => {
-                  const isSelected = answers[currentQuestion.id] === idx;
-                  const optionLetters = ["A", "B", "C", "D", "E"];
-                  return (
-                    <button
-                      key={idx}
-                      onClick={() => handleSelectOption(currentQuestion.id, idx)}
-                      className={`w-full text-left px-6 py-4 rounded-full border transition-all flex items-center gap-4 cursor-pointer text-sm font-medium ${
-                        isSelected
-                          ? "border-[#8e171c] bg-[#ffd0cc]/30 text-[#8e171c] ring-4 ring-[#8e171c]/10"
-                          : "border-[#e0bfbc]/70 bg-white text-[#251817] hover:border-[#8e171c]/50 hover:bg-[#fff8f7]"
-                      }`}
-                    >
-                      <span
-                        className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs transition-all ${
-                          isSelected ? "bg-[#8e171c] text-white" : "bg-[#fbe3e0] text-[#8e171c]"
+              {/* Option Choices or Subjective Text/Drawing input */}
+              {currentQuestion.type === "subjective" ? (
+                <div className="space-y-6">
+                  {/* Text area for typing answer */}
+                  <div className="space-y-2">
+                    <label className="block text-xs font-bold text-[#59413f]">
+                      1. พิมพ์คำตอบบรรยาย (Text Answer)
+                    </label>
+                    <textarea
+                      placeholder="พิมพ์อธิบายคำตอบของคุณที่นี่..."
+                      value={answers[currentQuestion.id]?.text || ""}
+                      onChange={(e) => handleSubjectiveTextChange(currentQuestion.id, e.target.value)}
+                      className="w-full px-5 py-4 rounded-3xl border border-[#e0bfbc] focus:border-[#8e171c] outline-none text-sm font-semibold text-[#251817] h-36 resize-none shadow-inner"
+                    />
+                  </div>
+
+                  {/* Canvas for drawing response */}
+                  <div className="space-y-2">
+                    <label className="block text-xs font-bold text-[#59413f]">
+                      2. กระดานวาดเขียน / วาดภาพส่งประกอบคำตอบ (Drawing Canvas)
+                    </label>
+                    <DrawingCanvas
+                      value={answers[currentQuestion.id]?.drawing || ""}
+                      onChange={(dataUrl) => handleSubjectiveDrawingChange(currentQuestion.id, dataUrl)}
+                    />
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {currentQuestion.options.map((option, idx) => {
+                    const isSelected = answers[currentQuestion.id] === idx;
+                    const optionLetters = ["A", "B", "C", "D", "E"];
+                    return (
+                      <button
+                        key={idx}
+                        onClick={() => handleSelectOption(currentQuestion.id, idx)}
+                        className={`w-full text-left px-6 py-4 rounded-full border transition-all flex items-center gap-4 cursor-pointer text-sm font-medium ${
+                          isSelected
+                            ? "border-[#8e171c] bg-[#ffd0cc]/30 text-[#8e171c] ring-4 ring-[#8e171c]/10"
+                            : "border-[#e0bfbc]/70 bg-white text-[#251817] hover:border-[#8e171c]/50 hover:bg-[#fff8f7]"
                         }`}
                       >
-                        {optionLetters[idx]}
-                      </span>
-                      <span>{option}</span>
-                    </button>
-                  );
-                })}
-              </div>
+                        <span
+                          className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs transition-all ${
+                            isSelected ? "bg-[#8e171c] text-white" : "bg-[#fbe3e0] text-[#8e171c]"
+                          }`}
+                        >
+                          {optionLetters[idx]}
+                        </span>
+                        <span>{option}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
             {/* Stepper controls */}

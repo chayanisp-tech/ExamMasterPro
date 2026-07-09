@@ -17,8 +17,10 @@ interface TeacherDashboardProps {
   onAddExam: (exam: Exam) => void;
   onDeleteExam: (id: string) => void;
   onToggleActive: (id: string) => void;
+  onUpdateExam: (exam: Exam) => void;
   submissions: Submission[];
   onDeleteSubmission: (id: string) => void;
+  onUpdateSubmission: (submission: Submission) => void;
   settings: SystemSettings;
   onUpdateSettings: (newSettings: SystemSettings) => void;
   onDiscardSettings: () => void;
@@ -39,8 +41,10 @@ export default function TeacherDashboard({
   onAddExam,
   onDeleteExam,
   onToggleActive,
+  onUpdateExam,
   submissions,
   onDeleteSubmission,
+  onUpdateSubmission,
   settings,
   onUpdateSettings,
   onDiscardSettings,
@@ -301,13 +305,16 @@ export default function TeacherDashboard({
               onAddExam={onAddExam}
               onDeleteExam={onDeleteExam}
               onToggleActive={onToggleActive}
+              onUpdateExam={onUpdateExam}
             />
           )}
 
           {activeTab === "grading" && (
             <TeacherGrading
               submissions={submissions}
+              exams={exams}
               onDeleteSubmission={onDeleteSubmission}
+              onUpdateSubmission={onUpdateSubmission}
               syncStatus={syncStatus}
               onTriggerSync={onTriggerSync}
             />

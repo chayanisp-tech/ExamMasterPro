@@ -1,8 +1,10 @@
 import React, { useState } from "react";
-import { Student } from "../types";
+import { Student, Submission, Exam } from "../types";
 
 interface StudentWelcomeProps {
   students: Student[];
+  submissions: Submission[];
+  activeExams: Exam[];
   onEnterExamRoom: (studentId: string) => void;
   onGoToTeacherLogin: () => void;
   onGoToScoreLookup: () => void;
@@ -10,6 +12,8 @@ interface StudentWelcomeProps {
 
 export default function StudentWelcome({
   students,
+  submissions,
+  activeExams,
   onEnterExamRoom,
   onGoToTeacherLogin,
   onGoToScoreLookup,
@@ -34,6 +38,21 @@ export default function StudentWelcome({
         setErrorText("ไม่พบรหัสนักเรียนนี้ในฐานข้อมูล กรุณาตรวจสอบอีกครั้งหรือติดต่ออาจารย์ผู้สอน");
         setIsValidating(false);
       } else {
+        // Check if they have submitted all active exams
+        const studentSubmissions = submissions.filter((s) => s.studentId === studentId);
+        const activeExamsFiltered = activeExams.filter((e) => e.isActive);
+        
+        // Find if they have completed all active exams with status "สมบูรณ์"
+        const completedActiveExams = activeExamsFiltered.filter((e) =>
+          studentSubmissions.some((s) => s.examId === e.id && s.status === "สมบูรณ์")
+        );
+
+        if (activeExamsFiltered.length > 0 && completedActiveExams.length === activeExamsFiltered.length) {
+          setErrorText("คุณได้ส่งคำตอบแล้ว");
+          setIsValidating(false);
+          return;
+        }
+
         setErrorText("");
         setIsValidating(false);
         onEnterExamRoom(studentId);
